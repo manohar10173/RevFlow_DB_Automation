@@ -1,0 +1,22 @@
+{
+  "name": "revflowapplication",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {},
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^24.3.0",
+    "allure-playwright": "^3.3.3"
+  },
+  "dependencies": {
+    "@faker-js/faker": "^10.0.0",
+    "dotenv": "^17.2.2",
+    "mssql": "^12.7.2",
+    "papaparse": "^5.5.3",
+    "xlsx": "^0.18.5"
+  }
+}

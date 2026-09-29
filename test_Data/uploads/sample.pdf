@@ -1,0 +1,5 @@
+const fileNameInput = this.page.locator("//arw-file-form//input");
+
+await expect(fileNameInput).toBeVisible({ timeout: 10000 });
+await fileNameInput.fill(""); 
+await fileNameInput.fill("uploadedTestFile.xlsx");
