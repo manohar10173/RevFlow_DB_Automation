@@ -1,46 +1,87 @@
-name: Apex Automated Tests
+name: Apex Dev Smoke Tests
 
-#on:
-  #workflow_dispatch:
 on:
- schedule:
-    #Run every day at 8:00 AM UTC
-    - cron: '0 8 * * *'
+  workflow_run:
+    workflows: ['Dev Deploy Orchestrator (Infra → Apps)']
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-smoke-dev
+  cancel-in-progress: false
+
 jobs:
-  test:
-    runs-on: [self-hosted, linux]
+  smoke-tests:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on:
+      group: rg-eng-apexhct-private
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: ARWorkflow.E2ETests
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout deployed code
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 18
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ARWorkflow.E2ETests/package-lock.json
 
       - name: Install dependencies
-        run: npm ci   # safer than npm install for CI
+        run: npm ci
 
-      - name: Install Playwright Browsers
-        run: npx playwright install --with-deps
+      - name: Install Playwright browsers
+        run: ./node_modules/.bin/playwright install --with-deps chromium
 
-      - name: Run Playwright tests
-        #run: npx playwright test --trace=on
-        run: npx playwright test --grep "@smoke" --trace=on
+      - name: Run smoke tests
+        id: smoke
+        run: npm run test:development -- --grep "@smoke" --trace=retain-on-failure
 
-
-      # Upload Playwright HTML Report
-      - name: Upload Playwright HTML Report
+      - name: Zip HTML report
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: playwright-report/
+        run: |
+          if [ -d playwright-report ]; then
+            zip -qr playwright-report.zip playwright-report
+          fi
 
-      # Upload raw test results (screenshots/videos)
-      - name: Upload Test Results
+      - name: Upload HTML report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: test-results
-          path: test-results/
+          name: playwright-html-report
+          path: ARWorkflow.E2ETests/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload JSON report and traces
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-test-results
+          path: |
+            ARWorkflow.E2ETests/playwright-report.json
+            ARWorkflow.E2ETests/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Email report via SendGrid
+        if: always()
+        env:
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          SENDGRID_FROM_EMAIL: ${{ secrets.SENDGRID_FROM_EMAIL }}
+          REPORT_EMAIL_TO: ${{ secrets.REPORT_EMAIL_TO }}
+          TEST_OUTCOME: ${{ steps.smoke.outcome || 'not_run' }}
+          GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+        run: node scripts/send-sendgrid-report.js
