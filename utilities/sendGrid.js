@@ -52,7 +52,7 @@ function buildAttachment() {
 }
 
 async function main() {
-  const apiKey = requireEnv('SENDGRID_API_KEY');
+  const apiKey = requireEnv('SENDGRIDAPIKEY');
   const from = requireEnv('SENDGRID_FROM_EMAIL');
   const to = parseRecipients(requireEnv('REPORT_EMAIL_TO'));
   if (to.length === 0) {
