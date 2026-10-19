@@ -1,10 +1,10 @@
 name: Apex Dev Smoke Tests
 
 on:
-  workflow_run:
-    workflows: ['Dev Deploy Orchestrator (Infra → Apps)']
-    types: [completed]
-    branches: [master]
+  # workflow_run:
+  #   workflows: ['Dev Deploy Orchestrator (Infra → Apps)']
+  #   types: [completed]
+  #   branches: [master]
   workflow_dispatch:
 
 permissions:
