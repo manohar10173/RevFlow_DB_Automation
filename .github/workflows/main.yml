@@ -1,10 +1,6 @@
 name: Apex Dev Smoke Tests
 
 on:
-  # workflow_run:
-  #   workflows: ['Dev Deploy Orchestrator (Infra → Apps)']
-  #   types: [completed]
-  #   branches: [master]
   workflow_dispatch:
 
 permissions:
@@ -16,10 +12,9 @@ concurrency:
 
 jobs:
   smoke-tests:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
-    runs-on:
-      group: rg-eng-apexhct-private
+    runs-on: ubuntu-latest
     timeout-minutes: 45
+
     defaults:
       run:
         working-directory: ARWorkflow.E2ETests
@@ -28,7 +23,7 @@ jobs:
       - name: Checkout deployed code
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -41,7 +36,7 @@ jobs:
         run: npm ci
 
       - name: Install Playwright browsers
-        run: ./node_modules/.bin/playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium
 
       - name: Run smoke tests
         id: smoke
@@ -59,7 +54,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: playwright-html-report
-          path: ARWorkflow.E2ETests/playwright-report/
+          path: |
+            ARWorkflow.E2ETests/playwright-report/
+            ARWorkflow.E2ETests/playwright-report.zip
           if-no-files-found: ignore
           retention-days: 14
 
@@ -83,5 +80,5 @@ jobs:
           TEST_OUTCOME: ${{ steps.smoke.outcome || 'not_run' }}
           GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_REF_NAME: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
         run: node scripts/send-sendgrid-report.js
