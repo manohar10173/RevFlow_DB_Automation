@@ -15,22 +15,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
-    defaults:
-      run:
-        working-directory: ARWorkflow.E2ETests
-
     steps:
-      - name: Checkout deployed code
+      - name: Checkout code
         uses: actions/checkout@v6
-        with:
-          ref: ${{ github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: ARWorkflow.E2ETests/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -55,8 +49,8 @@ jobs:
         with:
           name: playwright-html-report
           path: |
-            ARWorkflow.E2ETests/playwright-report/
-            ARWorkflow.E2ETests/playwright-report.zip
+            playwright-report/
+            playwright-report.zip
           if-no-files-found: ignore
           retention-days: 14
 
@@ -66,8 +60,8 @@ jobs:
         with:
           name: playwright-test-results
           path: |
-            ARWorkflow.E2ETests/playwright-report.json
-            ARWorkflow.E2ETests/test-results/
+            playwright-report.json
+            test-results/
           if-no-files-found: ignore
           retention-days: 14
 
@@ -81,4 +75,5 @@ jobs:
           GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
-        run: node scripts/send-sendgrid-report.js
+        run: node utilities/sendGrid.js
+
