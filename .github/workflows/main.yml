@@ -1,3 +1,4 @@
+
 name: Apex Dev Smoke Tests
 
 on:
@@ -12,7 +13,7 @@ concurrency:
 
 jobs:
   smoke-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: YOUR_ENVIRONMENT_NAME
 
@@ -30,7 +31,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright browsers
+      - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
       - name: Run smoke tests
@@ -42,6 +43,9 @@ jobs:
         run: |
           if [ -d playwright-report ]; then
             zip -qr playwright-report.zip playwright-report
+            echo "HTML report zipped successfully."
+          else
+            echo "No HTML report directory was generated."
           fi
 
       - name: Upload HTML report
@@ -69,7 +73,6 @@ jobs:
       - name: Email report via SendGrid
         if: always()
         env:
-          SENDGRIDAPIKEY: ${{ secrets.SENDGRIDAPIKEY }}
           SENDGRID_API_KEY: ${{ secrets.SENDGRIDAPIKEY }}
           SENDGRID_FROM_EMAIL: ${{ secrets.SENDGRID_FROM_EMAIL }}
           REPORT_EMAIL_TO: ${{ secrets.REPORT_EMAIL_TO }}
@@ -78,10 +81,11 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
         run: |
-          if [ -z "$SENDGRIDAPIKEY" ] || \
+          if [ -z "$SENDGRID_API_KEY" ] || \
              [ -z "$SENDGRID_FROM_EMAIL" ] || \
              [ -z "$REPORT_EMAIL_TO" ]; then
-            echo "::warning::SendGrid secrets are unavailable. Skipping email notification."
-            exit 0
+            echo "::error::One or more required email secrets are missing."
+            exit 1
           fi
+
           node utilities/sendGrid.js
