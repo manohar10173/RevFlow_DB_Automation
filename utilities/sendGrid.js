@@ -1,4 +1,4 @@
-```javascript
+
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -306,4 +306,4 @@ main().catch((error) => {
   console.error(`Email report failed: ${error.message}`);
   process.exitCode = 1;
 });
-```
+
