@@ -1,4 +1,3 @@
-
 name: Apex Dev Smoke Tests
 
 on:
@@ -6,6 +5,8 @@ on:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
 
 concurrency:
   group: e2e-smoke-dev
@@ -15,7 +16,11 @@ jobs:
   smoke-tests:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    environment: YOUR_ENVIRONMENT_NAME
+
+    # Replace this placeholder with your existing GitHub Environment name.
+    environment:
+      name: YOUR_ENVIRONMENT_NAME
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout code
@@ -31,7 +36,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright Chromium
+      - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
       - name: Run smoke tests
@@ -43,12 +48,9 @@ jobs:
         run: |
           if [ -d playwright-report ]; then
             zip -qr playwright-report.zip playwright-report
-            echo "HTML report zipped successfully."
-          else
-            echo "No HTML report directory was generated."
           fi
 
-      - name: Upload HTML report
+      - name: Upload HTML report artifact
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -70,12 +72,48 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      # Ensure Pages has a valid folder even if tests did not generate a report.
+      - name: Prepare HTML report for publishing
+        if: always()
+        run: |
+          if [ ! -f playwright-report/index.html ]; then
+            mkdir -p playwright-report
+            cat > playwright-report/index.html <<'HTML'
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><title>Playwright Report</title></head>
+          <body>
+            <h1>Playwright HTML report was not generated</h1>
+            <p>Check the GitHub Actions logs for the test or browser installation error.</p>
+          </body>
+          </html>
+          HTML
+          fi
+
+      - name: Configure GitHub Pages
+        if: always()
+        uses: actions/configure-pages@v5
+
+      - name: Upload report to GitHub Pages
+        if: always()
+        id: upload_pages
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: playwright-report
+
+      - name: Deploy report to GitHub Pages
+        if: always() && steps.upload_pages.outcome == 'success'
+        id: deployment
+        uses: actions/deploy-pages@v4
+
       - name: Email report via SendGrid
         if: always()
         env:
+          SENDGRIDAPIKEY: ${{ secrets.SENDGRIDAPIKEY }}
           SENDGRID_API_KEY: ${{ secrets.SENDGRIDAPIKEY }}
           SENDGRID_FROM_EMAIL: ${{ secrets.SENDGRID_FROM_EMAIL }}
           REPORT_EMAIL_TO: ${{ secrets.REPORT_EMAIL_TO }}
+          PLAYWRIGHT_REPORT_URL: ${{ steps.deployment.outputs.page_url }}
           TEST_OUTCOME: ${{ steps.smoke.outcome || 'not_run' }}
           GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -84,8 +122,8 @@ jobs:
           if [ -z "$SENDGRID_API_KEY" ] || \
              [ -z "$SENDGRID_FROM_EMAIL" ] || \
              [ -z "$REPORT_EMAIL_TO" ]; then
-            echo "::error::One or more required email secrets are missing."
-            exit 1
+            echo "::warning::SendGrid secrets are unavailable. Skipping email notification."
+            exit 0
           fi
 
           node utilities/sendGrid.js
