@@ -1,11 +1,11 @@
-
-const fs = require('node:fs');
-const path = require('node:path');
+```javascript
+const fs = require("node:fs");
+const path = require("node:path");
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 
 function requireEnv(name) {
-  const value = (process.env[name] || '').trim();
+  const value = (process.env[name] || "").trim();
 
   if (!value) {
     throw new Error(`Missing required environment variable: ${name}`);
@@ -15,24 +15,30 @@ function requireEnv(name) {
 }
 
 function parseRecipients(raw) {
-  return raw
+  const recipients = raw
     .split(/[;,]/)
-    .map((address) => address.trim())
+    .map((email) => email.trim())
     .filter(Boolean);
+
+  if (recipients.length === 0) {
+    throw new Error("REPORT_EMAIL_TO contains no recipients.");
+  }
+
+  return recipients;
 }
 
 function escapeHtml(value) {
   return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function readStats() {
   const reportPath = path.resolve(
-    process.env.REPORT_JSON_PATH || 'playwright-report.json'
+    process.env.REPORT_JSON_PATH || "playwright-report.json"
   );
 
   if (!fs.existsSync(reportPath)) {
@@ -41,8 +47,8 @@ function readStats() {
   }
 
   try {
-    const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
-    return report.stats ?? null;
+    const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+    return report.stats || null;
   } catch (error) {
     console.warn(`Could not read JSON report: ${error.message}`);
     return null;
@@ -51,50 +57,64 @@ function readStats() {
 
 function buildAttachment() {
   const zipPath = path.resolve(
-    process.env.REPORT_ZIP_PATH || 'playwright-report.zip'
+    process.env.REPORT_ZIP_PATH || "playwright-report.zip"
   );
 
   if (!fs.existsSync(zipPath)) {
     return {
       attachment: null,
-      note: 'HTML report ZIP is unavailable. Use the hosted report link or GitHub Actions artifacts.',
+      note:
+        "HTML report ZIP is unavailable. Check the GitHub Actions artifacts or hosted report link.",
     };
   }
 
-  const { size } = fs.statSync(zipPath);
+  const size = fs.statSync(zipPath).size;
+
+  if (size === 0) {
+    return {
+      attachment: null,
+      note: "HTML report ZIP is empty. Check the GitHub Actions logs.",
+    };
+  }
 
   if (size > MAX_ATTACHMENT_BYTES) {
     return {
       attachment: null,
-      note: `HTML report ZIP is ${(size / 1048576).toFixed(1)} MB and exceeds the 20 MB attachment limit. Download it from GitHub Actions artifacts.`,
+      note:
+        `HTML report ZIP is ${(size / 1048576).toFixed(1)} MB and exceeds ` +
+        "the 20 MB attachment limit. Check GitHub Actions artifacts.",
     };
   }
 
   return {
     attachment: {
-      content: fs.readFileSync(zipPath).toString('base64'),
-      filename: 'playwright-html-report.zip',
-      type: 'application/zip',
-      disposition: 'attachment',
+      content: fs.readFileSync(zipPath).toString("base64"),
+      filename: "playwright-html-report.zip",
+      type: "application/zip",
+      disposition: "attachment",
     },
-    note: 'The HTML report ZIP is attached. Extract it and open index.html.',
+    note: "The HTML report ZIP is attached. Extract it and open index.html.",
   };
 }
 
 function getSafeReportUrl() {
-  const rawUrl = (process.env.PLAYWRIGHT_REPORT_URL || '').trim();
+  const rawUrl = (process.env.PLAYWRIGHT_REPORT_URL || "").trim();
 
   if (!rawUrl) {
-    return '';
+    console.warn("PLAYWRIGHT_REPORT_URL is not configured.");
+    return "";
   }
 
   try {
     const url = new URL(rawUrl);
 
-    // Only allow HTTPS URLs hosted on GitHub Pages.
+    // Accept HTTPS URLs hosted on GitHub Pages.
     if (
-      url.protocol === 'https:' &&
-      (url.hostname === 'github.io' || url.hostname.endsWith('.github.io'))
+      url.protocol === "https:" &&
+      (url.hostname === "github.io" ||
+        url.hostname.endsWith(".github.io")) &&
+      !url.username &&
+      !url.password
     ) {
       return url.href;
     }
@@ -103,54 +123,74 @@ function getSafeReportUrl() {
   }
 
   console.warn(
-    'PLAYWRIGHT_REPORT_URL is missing or is not a valid HTTPS GitHub Pages URL.'
+    "Report URL must be a valid HTTPS GitHub Pages URL."
   );
 
-  return '';
+  return "";
+}
+
+function getSafeRunUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+
+    if (
+      url.protocol === "https:" &&
+      url.hostname === "github.com" &&
+      !url.username &&
+      !url.password
+    ) {
+      return url.href;
+    }
+  } catch {
+    // Ignore invalid URLs.
+  }
+
+  return "";
+}
+
+function formatStatus(outcome) {
+  switch (outcome) {
+    case "success":
+      return "PASSED";
+    case "failure":
+      return "FAILED";
+    case "cancelled":
+      return "CANCELLED";
+    default:
+      return "NOT RUN";
+  }
+}
+
+function formatSummary(stats) {
+  if (!stats) {
+    return "Test statistics are unavailable. Check the workflow run for details.";
+  }
+
+  return [
+    `Passed: ${stats.expected ?? 0}`,
+    `Failed: ${stats.unexpected ?? 0}`,
+    `Flaky: ${stats.flaky ?? 0}`,
+    `Skipped: ${stats.skipped ?? 0}`,
+  ].join(" | ");
 }
 
 async function main() {
-  const apiKey = requireEnv('SENDGRID_API_KEY');
-  const from = requireEnv('SENDGRID_FROM_EMAIL');
-  const to = parseRecipients(requireEnv('REPORT_EMAIL_TO'));
+  const apiKey = requireEnv("SENDGRID_API_KEY");
+  const from = requireEnv("SENDGRID_FROM_EMAIL");
+  const to = parseRecipients(requireEnv("REPORT_EMAIL_TO"));
 
-  if (to.length === 0) {
-    throw new Error('REPORT_EMAIL_TO contains no valid recipients.');
-  }
+  const outcome = process.env.TEST_OUTCOME || "not_run";
+  const status = formatStatus(outcome);
 
-  const outcome = process.env.TEST_OUTCOME || 'not_run';
-  const runUrl = process.env.GITHUB_RUN_URL || '';
-  const repository = process.env.GITHUB_REPOSITORY || '';
-  const branch = process.env.GITHUB_REF_NAME || '';
+  const repository = process.env.GITHUB_REPOSITORY || "Unknown repository";
+  const branch = process.env.GITHUB_REF_NAME || "Unknown branch";
 
   const stats = readStats();
+  const summary = formatSummary(stats);
+
   const { attachment, note } = buildAttachment();
   const reportUrl = getSafeReportUrl();
-
-  let status;
-
-  switch (outcome) {
-    case 'success':
-      status = 'PASSED';
-      break;
-    case 'failure':
-      status = 'FAILED';
-      break;
-    case 'cancelled':
-      status = 'CANCELLED';
-      break;
-    default:
-      status = 'NOT RUN';
-  }
-
-  const summary = stats
-    ? [
-        `Passed: ${stats.expected ?? 0}`,
-        `Failed: ${stats.unexpected ?? 0}`,
-        `Flaky: ${stats.flaky ?? 0}`,
-        `Skipped: ${stats.skipped ?? 0}`,
-      ].join(' | ')
-    : 'Test statistics are unavailable. Check the workflow run for details.';
+  const runUrl = getSafeRunUrl(process.env.GITHUB_RUN_URL || "");
 
   const safeStatus = escapeHtml(status);
   const safeRepository = escapeHtml(repository);
@@ -158,10 +198,8 @@ async function main() {
   const safeSummary = escapeHtml(summary);
   const safeNote = escapeHtml(note);
 
-  let reportLinkHtml = '';
-
-  if (reportUrl) {
-    reportLinkHtml = `
+  const reportLinkHtml = reportUrl
+    ? `
       <p>
         <a href="${escapeHtml(reportUrl)}"
            style="display:inline-block;padding:12px 18px;
@@ -170,41 +208,31 @@ async function main() {
           Open Playwright HTML Report
         </a>
       </p>
-    `;
-  } else {
-    reportLinkHtml = `
+    `
+    : `
       <p>
-        <strong>HTML report link is not available.</strong>
-        The report must be published to GitHub Pages and
-        PLAYWRIGHT_REPORT_URL must be configured in the workflow.
+        <strong>Hosted HTML report link is unavailable.</strong>
+        Check the GitHub Pages deployment step in the workflow.
       </p>
     `;
-  }
 
-  let runLinkHtml = '';
-
-  try {
-    const url = new URL(runUrl);
-
-    if (
-      url.protocol === 'https:' &&
-      url.hostname === 'github.com'
-    ) {
-      runLinkHtml = `
-        <p>
-          <a href="${escapeHtml(url.href)}">
-            View GitHub Actions Run
-          </a>
-        </p>
-      `;
-    }
-  } catch {
-    console.warn('GitHub Actions run URL is missing or invalid.');
-  }
+  const runLinkHtml = runUrl
+    ? `
+      <p>
+        <a href="${escapeHtml(runUrl)}">
+          View GitHub Actions Run
+        </a>
+      </p>
+    `
+    : "";
 
   const emailHtml = `
     <!DOCTYPE html>
     <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Playwright Smoke Test Report</title>
+      </head>
       <body style="font-family:Arial,sans-serif;line-height:1.6;">
         <h2>Development Smoke Test Report: ${safeStatus}</h2>
 
@@ -219,7 +247,7 @@ async function main() {
         ${reportLinkHtml}
         ${runLinkHtml}
 
-        <hr />
+        <hr>
         <p>${safeNote}</p>
       </body>
     </html>
@@ -231,13 +259,11 @@ async function main() {
         to: to.map((email) => ({ email })),
       },
     ],
-    from: {
-      email: from,
-    },
+    from: { email: from },
     subject: `[Dev] Smoke Tests ${status} - ${repository} (${branch})`,
     content: [
       {
-        type: 'text/html',
+        type: "text/html",
         value: emailHtml,
       },
     ],
@@ -246,18 +272,20 @@ async function main() {
 
   console.log(`Sending report to ${to.length} recipient(s).`);
   console.log(`Test outcome: ${status}`);
-  console.log(`HTML ZIP attached: ${attachment ? 'Yes' : 'No'}`);
-  console.log(`Hosted report URL configured: ${reportUrl ? 'Yes' : 'No'}`);
+  console.log(`JSON statistics available: ${stats ? "Yes" : "No"}`);
+  console.log(`HTML ZIP attached: ${attachment ? "Yes" : "No"}`);
+  console.log(`Hosted report URL configured: ${reportUrl ? "Yes" : "No"}`);
 
   const response = await fetch(
-    'https://api.sendgrid.com/v3/mail/send',
+    "https://api.sendgrid.com/v3/mail/send",
     {
-      method: 'POST',
+      method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(30000),
     }
   );
 
@@ -265,7 +293,7 @@ async function main() {
     const details = await response.text();
 
     throw new Error(
-      `SendGrid returned ${response.status}: ${details}`
+      `SendGrid returned HTTP ${response.status}: ${details}`
     );
   }
 
@@ -278,3 +306,4 @@ main().catch((error) => {
   console.error(`Email report failed: ${error.message}`);
   process.exitCode = 1;
 });
+```
