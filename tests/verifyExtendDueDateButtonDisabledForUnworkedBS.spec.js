@@ -18,7 +18,7 @@ test.describe("Verify Extend Due Date Button Functionality In Task List Page", (
         await context.close(); // closes page(s) + context together
     });
 
-    test("@smoke Verify Extend Due Date Button is Disabled for Unworked Balance Status", async () => {
+    test("Verify Extend Due Date Button is Disabled for Unworked Balance Status", async () => {
         const taskListPage = new sections.TaskListPage(test, page);
         await taskListPage.TaskListBtn.waitFor({ state: 'visible', timeout: 30000 })
         await taskListPage.clickOnTaskList();
