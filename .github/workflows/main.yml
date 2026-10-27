@@ -1,4 +1,3 @@
-```yaml
 name: Apex Dev Smoke Tests
 
 on:
@@ -181,4 +180,3 @@ jobs:
           fi
 
           node utilities/sendGrid.js
-```
