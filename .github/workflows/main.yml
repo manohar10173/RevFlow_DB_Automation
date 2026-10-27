@@ -1,3 +1,4 @@
+```yaml
 name: Apex Dev Smoke Tests
 
 on:
@@ -13,14 +14,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Job 1: Run Playwright tests and save the reports
   smoke-tests:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
 
-    # Replace this placeholder with your existing GitHub Environment name.
+    # IMPORTANT: Replace with your actual GitHub Environment name.
+    # Your SendGrid secrets must exist in this Environment.
     environment:
       name: YOUR_ENVIRONMENT_NAME
-      url: ${{ steps.deployment.outputs.page_url }}
+
+    outputs:
+      test_outcome: ${{ steps.smoke.outcome }}
 
     steps:
       - name: Checkout code
@@ -43,6 +48,23 @@ jobs:
         id: smoke
         run: npm run test:development -- --grep "@smoke" --trace=retain-on-failure
 
+      # Generate a fallback page if Playwright did not produce a report.
+      - name: Prepare HTML report
+        if: always()
+        run: |
+          if [ ! -f playwright-report/index.html ]; then
+            mkdir -p playwright-report
+
+            printf '%s\n' \
+              '<!DOCTYPE html>' \
+              '<html lang="en">' \
+              '<head><meta charset="UTF-8"><title>Playwright Report</title></head>' \
+              '<body><h1>Playwright HTML report was not generated</h1>' \
+              '<p>Check the GitHub Actions logs for test or browser installation errors.</p></body>' \
+              '</html>' \
+              > playwright-report/index.html
+          fi
+
       - name: Zip HTML report
         if: always()
         run: |
@@ -50,80 +72,113 @@ jobs:
             zip -qr playwright-report.zip playwright-report
           fi
 
-      - name: Upload HTML report artifact
+      # This artifact is downloaded by the Pages deployment job.
+      - name: Upload report for GitHub Pages
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
-          name: playwright-html-report
-          path: |
-            playwright-report/
-            playwright-report.zip
-          if-no-files-found: ignore
+          name: pages-report
+          path: playwright-report/
+          if-no-files-found: error
           retention-days: 14
 
-      - name: Upload JSON report and traces
+      - name: Upload HTML report and diagnostics
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: playwright-test-results
           path: |
+            playwright-report.zip
             playwright-report.json
             test-results/
           if-no-files-found: ignore
           retention-days: 14
 
-      # Ensure Pages has a valid folder even if tests did not generate a report.
-      - name: Prepare HTML report for publishing
-        if: always()
-        run: |
-          if [ ! -f playwright-report/index.html ]; then
-            mkdir -p playwright-report
-            cat > playwright-report/index.html <<'HTML'
-          <!DOCTYPE html>
-          <html>
-          <head><meta charset="UTF-8"><title>Playwright Report</title></head>
-          <body>
-            <h1>Playwright HTML report was not generated</h1>
-            <p>Check the GitHub Actions logs for the test or browser installation error.</p>
-          </body>
-          </html>
-          HTML
-          fi
+  # Job 2: Publish the report using the GitHub Pages environment
+  deploy-report:
+    needs: smoke-tests
+    if: always() && needs.smoke-tests.result != 'cancelled'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Download HTML report
+        uses: actions/download-artifact@v4
+        with:
+          name: pages-report
+          path: playwright-report
+
+      # Enable Pages if it has not yet been enabled.
       - name: Configure GitHub Pages
-        if: always()
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Upload report to GitHub Pages
-        if: always()
         id: upload_pages
         uses: actions/upload-pages-artifact@v4
         with:
           path: playwright-report
 
       - name: Deploy report to GitHub Pages
-        if: always() && steps.upload_pages.outcome == 'success'
         id: deployment
         uses: actions/deploy-pages@v4
 
+  # Job 3: Send the email using secrets from your existing Environment
+  email-report:
+    needs:
+      - smoke-tests
+      - deploy-report
+
+    if: always() && needs.smoke-tests.result != 'cancelled'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    # IMPORTANT: Use the same Environment that contains your SendGrid secrets.
+    environment:
+      name: YOUR_ENVIRONMENT_NAME
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
       - name: Email report via SendGrid
-        if: always()
         env:
-          SENDGRIDAPIKEY: ${{ secrets.SENDGRIDAPIKEY }}
           SENDGRID_API_KEY: ${{ secrets.SENDGRIDAPIKEY }}
           SENDGRID_FROM_EMAIL: ${{ secrets.SENDGRID_FROM_EMAIL }}
           REPORT_EMAIL_TO: ${{ secrets.REPORT_EMAIL_TO }}
-          PLAYWRIGHT_REPORT_URL: ${{ steps.deployment.outputs.page_url }}
-          TEST_OUTCOME: ${{ steps.smoke.outcome || 'not_run' }}
+
+          PLAYWRIGHT_REPORT_URL: ${{ needs.deploy-report.outputs.page_url }}
+          TEST_OUTCOME: ${{ needs.smoke-tests.outputs.test_outcome || 'not_run' }}
+
           GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
+
         run: |
           if [ -z "$SENDGRID_API_KEY" ] || \
              [ -z "$SENDGRID_FROM_EMAIL" ] || \
              [ -z "$REPORT_EMAIL_TO" ]; then
-            echo "::warning::SendGrid secrets are unavailable. Skipping email notification."
-            exit 0
+            echo "::error::SendGrid secrets are unavailable. Check the selected GitHub Environment."
+            exit 1
           fi
 
           node utilities/sendGrid.js
+```
