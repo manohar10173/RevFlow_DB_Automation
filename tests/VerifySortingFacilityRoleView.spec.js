@@ -18,7 +18,7 @@ test.describe("Verify Sort behavior for all applicable columns on FacilityRole V
     await context.close(); // closes page(s) + context together
   });
 
-  test("@regression Verify Sort behavior for all applicable columns on FacilityRole View", async () => {
+  test("@smoke Verify Sort behavior for all applicable columns on FacilityRole View", async () => {
     const userManagementPage = new sections.UserManagementPage(test, page);
     await userManagementPage.verifyFacilitySortFunctionality()
     await userManagementPage.verifyLastNameSortFunctunality()
